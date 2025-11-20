@@ -1,0 +1,16 @@
+flask
+langchain
+langchain-openai
+langchain-core
+langgraph
+fastmcp
+mcp
+langchain-mcp-adapters
+uvicorn[standard]
+fastapi
+requests
+httpx
+httpx-sse
+pydantic==2.10.6
+anyio
+generative-ai-hub-sdk
