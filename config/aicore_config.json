@@ -1,7 +1,0 @@
-{
-  "AICORE_CLIENT_ID": "sb-863650ad-c51c-4b6d-ad9a-16fb7b1eacb0!b313091|aisvc-662318f9-ies-aicore-service!b540",
-  "AICORE_CLIENT_SECRET": "35a6be6c-57c3-491f-9c26-3bd49ffcf4ea$-ARY1N354RHxyjEGn-n7SDYW7rbw2yeDebkxJJokspc=",
-  "AICORE_BASE_URL": "https://api.ai.prod.eu-central-1.aws.ml.hana.ondemand.com",
-  "AICORE_AUTH_URL": "https://sapit-core-playground-vole.authentication.eu10.hana.ondemand.com/oauth/token",
-  "AICORE_RESOURCE_GROUP": "sapit-core-playground-vole"
-}
