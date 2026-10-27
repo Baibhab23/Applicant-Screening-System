@@ -4,66 +4,13 @@ An AI-powered applicant screening and interview validation system using open-sou
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    Client(["Client (HTTP)"])
+The system is a three-stage hiring pipeline exposed as a Flask REST API. A resume submitted to `/screen` is parsed for contact details and skills, then handed to a `ScreeningAgent` that asks an LLM to score and evaluate it against job requirements. The result is stored in memory and an applicant ID is returned.
 
-    subgraph FlaskAPI["Flask API  —  src/app.py"]
-        S["/screen"]
-        V["/validate"]
-        R["/recommend"]
-    end
+When interview responses arrive at `/validate`, two things run: a `ValidationAgent` calls the LLM for a semantic evaluation across technical ability, communication, and problem-solving, while a separate `MCP Server` process (running over SSE on `:8000`) applies rule-based checks — minimum question count, response length, and keyword scoring. The final interview score blends both: 60% LLM, 40% MCP rules.
 
-    subgraph Agents["Agents"]
-        SA["ScreeningAgent"]
-        VA["ValidationAgent"]
-    end
+Calling `/recommend/<id>` pulls both evaluations and sends them together to the LLM in a single prompt, which returns a `STRONG_HIRE / HIRE / MAYBE / REJECT` decision with a confidence score and reasoning.
 
-    subgraph LLMLayer["LLM Layer  —  src/utils/llm_client.py"]
-        LC["LLMClient"]
-        subgraph Providers["Provider (env: LLM_PROVIDER)"]
-            OL["Ollama\n(free / local)"]
-            GR["Groq\n(free cloud)"]
-            OA["OpenAI\n(optional)"]
-        end
-    end
-
-    subgraph MCPServer["MCP Server  —  src/mcp_servers/interview_validator.py"]
-        T1["validate_interview()"]
-        T2["score_interview()"]
-        T3["get_interview_questions()"]
-    end
-
-    subgraph Tools["Tools"]
-        RP["ResumeParser"]
-        IS["InterviewScorer"]
-    end
-
-    subgraph Models["Data Models"]
-        AM["Applicant"]
-        IM["Interview"]
-    end
-
-    Client -->|POST /screen| S
-    Client -->|POST /validate| V
-    Client -->|POST /recommend| R
-
-    S --> RP
-    S --> SA
-    V --> VA
-    V -->|SSE| MCPServer
-    R --> LC
-
-    SA --> LC
-    VA --> LC
-
-    LC --> OL
-    LC --> GR
-    LC --> OA
-
-    S -.->|stores| AM
-    V -.->|stores| IM
-```
+The LLM layer is provider-agnostic — a single `LLM_PROVIDER` environment variable switches between **Ollama** (local, free), **Groq** (cloud, free), and **OpenAI** without changing any application code. All state lives in plain Python dicts in memory; there is no database.
 
 ## Setup
 
