@@ -1,51 +1,92 @@
-from gen_ai_hub.proxy.langchain.init_models import init_llm
-from gen_ai_hub.proxy.core.proxy_clients import get_proxy_client
+import os
+import json
 from langchain_core.messages import HumanMessage, SystemMessage
 
+
 class LLMClient:
-    def __init__(self, model_name="gpt-4o"):
-        """
-        Initialize LLM client with SAP AI Core
-        Available models: gpt-4o, gpt-4, gpt-35-turbo
-        """
-        self.proxy_client = get_proxy_client('gen-ai-hub')
+    """
+    LLM client supporting Ollama (free/local), Groq (free cloud), and OpenAI.
+    Set LLM_PROVIDER env var to "ollama" (default), "groq", or "openai".
+    """
+
+    def __init__(self, model_name: str = None):
+        self.provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+
+        if model_name is None:
+            model_name = os.getenv("LLM_MODEL", self._default_model())
+
         self.model_name = model_name
-        
-        # Initialize LLM using SAP AI Core
-        try:
-            self.llm = init_llm(
-                model_name=model_name,
-                proxy_client=self.proxy_client,
+        self.llm = self._init_llm()
+        print(f"LLM initialized: provider={self.provider}, model={self.model_name}")
+
+    def _default_model(self) -> str:
+        defaults = {
+            "ollama": "llama3.1",
+            "groq": "llama-3.1-8b-instant",
+            "openai": "gpt-4o-mini",
+        }
+        return defaults.get(self.provider, "llama3.1")
+
+    def _init_llm(self):
+        if self.provider == "ollama":
+            from langchain_ollama import ChatOllama
+            base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            return ChatOllama(
+                model=self.model_name,
+                base_url=base_url,
                 temperature=0.7,
-                max_tokens=4000
-            )
-            print(f"✅ Successfully initialized {model_name}")
-        except Exception as e:
-            print(f"❌ Error initializing {model_name}: {e}")
-            print("Falling back to gpt-35-turbo...")
-            self.model_name = "gpt-35-turbo"
-            self.llm = init_llm(
-                model_name="gpt-35-turbo",
-                proxy_client=self.proxy_client,
-                temperature=0.7,
-                max_tokens=4000
             )
 
-    async def send_request(self, user_message: str, system_message: str = None):
-        """Send a request to the LLM"""
+        elif self.provider == "groq":
+            from langchain_groq import ChatGroq
+            api_key = os.getenv("GROQ_API_KEY")
+            if not api_key:
+                raise ValueError("GROQ_API_KEY must be set when using Groq provider")
+            return ChatGroq(
+                model=self.model_name,
+                api_key=api_key,
+                temperature=0.7,
+                max_tokens=4000,
+            )
+
+        elif self.provider == "openai":
+            from langchain_openai import ChatOpenAI
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY must be set when using OpenAI provider")
+            return ChatOpenAI(
+                model=self.model_name,
+                api_key=api_key,
+                temperature=0.7,
+                max_tokens=4000,
+            )
+
+        else:
+            raise ValueError(
+                f"Unsupported LLM_PROVIDER: '{self.provider}'. "
+                "Choose from: ollama, groq, openai"
+            )
+
+    async def send_request(self, user_message: str, system_message: str = None) -> str:
         messages = []
-        
         if system_message:
             messages.append(SystemMessage(content=system_message))
-        
         messages.append(HumanMessage(content=user_message))
-        
         response = await self.llm.ainvoke(messages)
         return response.content
 
+    def _parse_json_response(self, content: str, fallback: dict) -> dict:
+        try:
+            start = content.find('{')
+            end = content.rfind('}') + 1
+            if start != -1 and end > start:
+                return json.loads(content[start:end])
+            raise ValueError("No JSON object found in response")
+        except Exception as e:
+            print(f"Warning: Could not parse JSON response: {e}")
+            return {**fallback, "reasoning": content}
+
     async def evaluate_resume(self, resume_text: str, job_requirements: dict) -> dict:
-        """Evaluate resume against job requirements"""
-        
         system_prompt = """You are an expert HR recruiter evaluating candidate resumes.
 Analyze the resume and provide your evaluation in JSON format with these keys:
 - match_score (0-100)
@@ -56,47 +97,19 @@ Analyze the resume and provide your evaluation in JSON format with these keys:
 - recommendation (HIRE/MAYBE/REJECT)
 - reasoning (string)"""
 
-        user_prompt = f"""
-Job Requirements:
-{job_requirements}
+        user_prompt = f"""Job Requirements:\n{job_requirements}\n\nResume:\n{resume_text}\n\nProvide detailed evaluation in JSON format."""
 
-Resume:
-{resume_text}
-
-Provide detailed evaluation in JSON format.
-"""
-        
         response = await self.send_request(user_prompt, system_prompt)
-        
-        # Parse JSON response
-        import json
-        try:
-            # Extract JSON from response
-            content = response
-            start = content.find('{')
-            end = content.rfind('}') + 1
-            if start != -1 and end > start:
-                json_str = content[start:end]
-                evaluation = json.loads(json_str)
-            else:
-                raise ValueError("No JSON found in response")
-        except Exception as e:
-            print(f"Warning: Could not parse JSON response: {e}")
-            evaluation = {
-                "match_score": 70,
-                "strengths": ["Professional experience", "Relevant skills"],
-                "weaknesses": ["Limited specific details"],
-                "experience_level": "Mid-level",
-                "skills_match": 65,
-                "recommendation": "MAYBE",
-                "reasoning": content
-            }
-        
-        return evaluation
+        return self._parse_json_response(response, {
+            "match_score": 70,
+            "strengths": ["Professional experience", "Relevant skills"],
+            "weaknesses": ["Limited specific details"],
+            "experience_level": "Mid-level",
+            "skills_match": 65,
+            "recommendation": "MAYBE",
+        })
 
     async def evaluate_interview(self, interview_data: dict, candidate_profile: dict) -> dict:
-        """Evaluate interview responses"""
-        
         system_prompt = """You are an expert technical interviewer.
 Evaluate the candidate's interview responses in JSON format with these keys:
 - technical_score (0-100)
@@ -108,49 +121,26 @@ Evaluate the candidate's interview responses in JSON format with these keys:
 - key_insights (list of strings)
 - concerns (list of strings)"""
 
-        user_prompt = f"""
-Candidate Profile:
-{candidate_profile}
+        user_prompt = f"""Candidate Profile:\n{candidate_profile}\n\nInterview Responses:\n{interview_data}\n\nProvide detailed evaluation in JSON format."""
 
-Interview Responses:
-{interview_data}
-
-Provide detailed evaluation in JSON format.
-"""
-        
         response = await self.send_request(user_prompt, system_prompt)
-        
-        import json
-        try:
-            content = response
-            start = content.find('{')
-            end = content.rfind('}') + 1
-            if start != -1 and end > start:
-                json_str = content[start:end]
-                evaluation = json.loads(json_str)
-            else:
-                raise ValueError("No JSON found")
-        except Exception as e:
-            print(f"Warning: Could not parse JSON response: {e}")
-            evaluation = {
-                "technical_score": 75,
-                "communication_score": 80,
-                "problem_solving_score": 70,
-                "cultural_fit_score": 85,
-                "overall_score": 77.5,
-                "recommendation": "HIRE",
-                "key_insights": ["Strong technical background"],
-                "concerns": []
-            }
-        
-        return evaluation
+        return self._parse_json_response(response, {
+            "technical_score": 75,
+            "communication_score": 80,
+            "problem_solving_score": 70,
+            "cultural_fit_score": 85,
+            "overall_score": 77.5,
+            "recommendation": "HIRE",
+            "key_insights": ["Strong technical background"],
+            "concerns": [],
+        })
 
-    async def generate_final_recommendation(self, 
-                                           resume_evaluation: dict, 
-                                           interview_evaluation: dict,
-                                           candidate_data: dict) -> dict:
-        """Generate final hiring recommendation"""
-        
+    async def generate_final_recommendation(
+        self,
+        resume_evaluation: dict,
+        interview_evaluation: dict,
+        candidate_data: dict,
+    ) -> dict:
         system_prompt = """You are a senior hiring manager making final hiring decisions.
 Provide your recommendation in JSON format with these keys:
 - decision (STRONG_HIRE/HIRE/MAYBE/REJECT)
@@ -160,43 +150,16 @@ Provide your recommendation in JSON format with these keys:
 - next_steps (list of strings)
 - detailed_reasoning (string)"""
 
-        user_prompt = f"""
-Resume Evaluation:
-{resume_evaluation}
+        user_prompt = f"""Resume Evaluation:\n{resume_evaluation}\n\nInterview Evaluation:\n{interview_evaluation}\n\nCandidate Data:\n{candidate_data}\n\nMake final hiring recommendation in JSON format."""
 
-Interview Evaluation:
-{interview_evaluation}
-
-Candidate Data:
-{candidate_data}
-
-Make final hiring recommendation in JSON format.
-"""
-        
         response = await self.send_request(user_prompt, system_prompt)
-        
-        import json
-        try:
-            content = response
-            start = content.find('{')
-            end = content.rfind('}') + 1
-            if start != -1 and end > start:
-                json_str = content[start:end]
-                recommendation = json.loads(json_str)
-            else:
-                raise ValueError("No JSON found")
-        except Exception as e:
-            print(f"Warning: Could not parse JSON response: {e}")
-            recommendation = {
-                "decision": "HIRE",
-                "confidence_score": 80,
-                "key_strengths": ["Strong technical skills", "Good communication"],
-                "key_concerns": ["Limited experience in specific areas"],
-                "next_steps": ["Conduct final reference check"],
-                "detailed_reasoning": content
-            }
-        
-        return recommendation
+        return self._parse_json_response(response, {
+            "decision": "HIRE",
+            "confidence_score": 80,
+            "key_strengths": ["Strong technical skills", "Good communication"],
+            "key_concerns": ["Limited experience in specific areas"],
+            "next_steps": ["Conduct final reference check"],
+        })
 
     def get_llm(self):
         return self.llm

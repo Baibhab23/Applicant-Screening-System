@@ -2,15 +2,6 @@
   "mcpServers": {
     "interview_validator": {
       "url": "http://127.0.0.1:8000/sse"
-    },
-    "HANA": {
-      "url": "https://sap-mcp-server-s4-sql.cfapps.eu12-002.hana.ondemand.com/mcp"
-    },
-    "S/4HANA": {
-      "url": "https://sap-mcp-server-s4-odata.internal.cfapps.eu12-002.hana.ondemand.com/mcp"
-    },
-    "KnowledgeGraph": {
-      "url": "https://sap-mcp-server-kg-int.internal.cfapps.eu12-002.hana.ondemand.com/mcp"
     }
   }
 }

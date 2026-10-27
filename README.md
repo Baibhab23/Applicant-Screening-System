@@ -1,54 +1,132 @@
 # Applicant Screening and Interview Validation System
 
-This project implements an Applicant Screening and Interview Validation System, designed to streamline the hiring process by utilizing a decision engine powered by machine learning and natural language processing.
+An AI-powered applicant screening and interview validation system using open-source LLMs via Ollama, Groq, or OpenAI.
 
 ## Project Structure
 
-- **src/**: Contains the main application code.
-  - **app.py**: Entry point of the application.
-  - **mcp_servers/**: Contains the logic for the MCP Decision Engine.
-    - **decision_engine.py**: Scoring, validation, and recommendation functions.
-    - **applicant_analyzer.py**: Analyzes applicant data and extracts features.
-    - **interview_validator.py**: Validates interview data and assesses performance.
-  - **agents/**: Contains agents that interact with the screening and validation processes.
-    - **screening_agent.py**: Processes resumes and extracts information.
-    - **validation_agent.py**: Manages interview validation and scoring.
-  - **models/**: Defines data models for applicants and interviews.
-    - **applicant.py**: Applicant model with properties like name and experience.
-    - **interview.py**: Interview model with candidate responses and scores.
-  - **utils/**: Utility functions for various tasks.
-    - **llm_client.py**: Interacts with the Language Model client.
-    - **config_loader.py**: Loads configuration settings from JSON files.
-  - **tools/**: Implements specific functionalities.
-    - **resume_parser.py**: Parses resumes and extracts relevant data.
-    - **interview_scorer.py**: Scores interviews based on criteria.
+- **src/**: Main application code
+  - **app.py**: Flask API entry point
+  - **agents/**: Screening and validation agents
+  - **mcp_servers/**: MCP server tools (interview validation, scoring)
+  - **models/**: Data models for applicants and interviews
+  - **utils/**: LLM client and config utilities
+  - **tools/**: Resume parser and interview scorer
+- **config/**: Configuration files
+  - **llm_config.json**: LLM provider settings
+  - **mcp_servers.json**: MCP server endpoints
+- **tests/**: Unit tests
 
-- **config/**: Contains configuration files.
-  - **mcp_servers.json**: Configuration for MCP servers.
-  - **aicore_config.json**: Configuration for AI core services.
+## Setup
 
-- **tests/**: Contains unit tests for the application.
-  - **test_decision_engine.py**: Tests for the decision engine logic.
-  - **test_agents.py**: Tests for the agents' functionality.
+### 1. Install dependencies
 
-- **requirements.txt**: Lists project dependencies.
+```bash
+pip install -r requirements.txt
+```
 
-- **.env.example**: Example of environment variables needed for the project.
+### 2. Choose an LLM provider
 
-## Setup Instructions
+Copy `.env.example` to `.env` and set your provider:
 
-1. Clone the repository.
-2. Install the required dependencies using `pip install -r requirements.txt`.
-3. Configure the environment variables as needed by copying `.env.example` to `.env` and updating the values.
-4. Ensure that the MCP servers and AI core configurations are set in the `config` directory.
-5. Run the application using `python src/app.py`.
+```bash
+cp .env.example .env
+```
 
-## Usage Guidelines
+#### Option A: Ollama (free, local — recommended)
 
-- The system allows for the submission of applicant resumes and interview data.
-- The decision engine processes this data to provide scoring and validation results.
-- Agents facilitate the interaction between the user and the underlying logic.
+Install Ollama from [https://ollama.com](https://ollama.com), then pull a model:
 
-## Overview of the Architecture
+```bash
+ollama pull llama3.1
+```
 
-The architecture is designed to be modular, allowing for easy updates and maintenance. Each component has a specific responsibility, ensuring that the system is scalable and efficient. The use of MCP servers enables advanced decision-making capabilities, while the integration of AI core services enhances the overall functionality of the system.
+Set in `.env`:
+```
+LLM_PROVIDER=ollama
+LLM_MODEL=llama3.1
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+#### Option B: Groq (free cloud API)
+
+Get a free API key at [https://console.groq.com](https://console.groq.com).
+
+Set in `.env`:
+```
+LLM_PROVIDER=groq
+LLM_MODEL=llama-3.1-8b-instant
+GROQ_API_KEY=your_key_here
+```
+
+#### Option C: OpenAI
+
+```
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+OPENAI_API_KEY=your_key_here
+```
+
+### 3. Run the application
+
+```bash
+python src/app.py
+```
+
+The API will start at `http://localhost:5000`.
+
+### 4. (Optional) Start the MCP interview validator server
+
+```bash
+python src/mcp_servers/interview_validator.py
+```
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | System info and endpoint list |
+| POST | `/screen` | Screen a candidate's resume |
+| POST | `/validate` | Validate interview responses |
+| POST | `/recommend/<id>` | Generate final hiring recommendation |
+| GET | `/applicants` | List all applicants |
+| GET | `/applicant/<id>` | Get a specific applicant's profile |
+
+### Example: Screen a resume
+
+```bash
+curl -X POST http://localhost:5000/screen \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resume_text": "Jane Doe\njane@example.com\nSoftware Engineer with 5 years Python, AWS, Docker experience.",
+    "job_requirements": {
+      "required_skills": ["Python", "AWS"],
+      "required_experience": "3+ years"
+    }
+  }'
+```
+
+### Example: Validate an interview
+
+```bash
+curl -X POST http://localhost:5000/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "applicant_id": 1,
+    "interview_data": {
+      "responses": {
+        "Q1": "I have 5 years of Python experience building microservices.",
+        "Q2": "I led a team of 4 engineers on a cloud migration project.",
+        "Q3": "I use TDD and CI/CD to ensure code quality."
+      }
+    }
+  }'
+```
+
+## Architecture
+
+The system is modular:
+- **LLM Client** (`src/utils/llm_client.py`): Abstracts Ollama/Groq/OpenAI behind a common interface
+- **Screening Agent**: Evaluates resumes using LLM
+- **Validation Agent**: Evaluates interview responses using LLM
+- **MCP Server** (`src/mcp_servers/interview_validator.py`): Provides rule-based interview scoring tools
+- **Flask API**: Ties everything together

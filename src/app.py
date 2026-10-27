@@ -3,7 +3,6 @@ import asyncio
 import os
 import sys
 
-# Add src to path for imports
 sys.path.insert(0, os.path.dirname(__file__))
 
 from utils.llm_client import LLMClient
@@ -18,7 +17,6 @@ from utils.config_loader import load_mcp_config
 mcp_cfg = load_mcp_config()
 MCP_URL = mcp_cfg["mcpServers"]["interview_validator"]["url"]
 
-# Toggle MCP usage
 USE_MCP = True
 
 app = Flask(__name__)
@@ -29,32 +27,29 @@ interviews_store = {}
 recommendations_store = {}
 next_id = 1
 
-# Initialize LLM Client with GPT-4o (SAP AI Core)
-llm_client = LLMClient("gpt-4o")
+# Initialize LLM Client (provider controlled by LLM_PROVIDER env var)
+llm_client = LLMClient()
 
-# Initialize agents WITHOUT langchain_mcp_adapters
-screening_agent = ScreeningAgent(model_name="gpt-4o")
-validation_agent = ValidationAgent(model_name="gpt-4o")
+screening_agent = ScreeningAgent()
+validation_agent = ValidationAgent()
 
 
 @app.route('/')
 def home():
+    provider = os.getenv("LLM_PROVIDER", "ollama")
     return jsonify({
-        "message": "Welcome to the Applicant Screening and Interview Validation System (AI-Powered)",
-        "llm_model": "gpt-4o",
+        "message": "Welcome to the Applicant Screening and Interview Validation System",
+        "llm_provider": provider,
         "endpoints": {
             "/screen": "POST - Screen a candidate's resume",
             "/validate": "POST - Validate interview responses",
             "/recommend/<id>": "POST - Generate final recommendation",
             "/applicants": "GET - Get all applicants",
-            "/applicant/<id>": "GET - Get specific applicant profile"
-        }
+            "/applicant/<id>": "GET - Get specific applicant profile",
+        },
     })
 
 
-# ------------------------------------------------------------
-# SCREEN ENDPOINT
-# ------------------------------------------------------------
 @app.route('/screen', methods=['POST'])
 def screen_applicant():
     global next_id
@@ -66,11 +61,9 @@ def screen_applicant():
         if not resume_text:
             return jsonify({"error": "resume_text is required"}), 400
 
-        # Parse resume
         parser = ResumeParser(resume_text)
         parsed_data = parser.parse()
 
-        # AI screening
         screening_result = asyncio.run(
             screening_agent.process_resume(resume_text, job_requirements)
         )
@@ -78,7 +71,6 @@ def screen_applicant():
         screening_score = screening_result.get('final_score', 70)
         ai_eval = screening_result.get('ai_evaluation', {})
 
-        # Store
         applicant_id = next_id
         next_id += 1
 
@@ -88,12 +80,9 @@ def screen_applicant():
             "email": parsed_data.get('email', ''),
             "phone": parsed_data.get('phone', ''),
             "resume_text": resume_text,
-            "parsed_data": {
-                **parsed_data,
-                "ai_evaluation": ai_eval
-            },
+            "parsed_data": {**parsed_data, "ai_evaluation": ai_eval},
             "screening_score": screening_score,
-            "status": "screened"
+            "status": "screened",
         }
 
         return jsonify({
@@ -102,16 +91,13 @@ def screen_applicant():
             "parsed_data": parsed_data,
             "screening_score": screening_score,
             "ai_evaluation": ai_eval,
-            "recommendation": ai_eval.get('recommendation', 'MAYBE')
+            "recommendation": ai_eval.get('recommendation', 'MAYBE'),
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# ------------------------------------------------------------
-# VALIDATE ENDPOINT (AI + MCP)
-# ------------------------------------------------------------
 @app.route('/validate', methods=['POST'])
 def validate_interview():
     global next_id
@@ -124,24 +110,19 @@ def validate_interview():
             return jsonify({"error": "applicant_id is required"}), 400
 
         applicant = applicants_store.get(applicant_id)
-
         if not applicant:
             return jsonify({"error": "Applicant not found"}), 404
 
         candidate_profile = {
             "name": applicant.get('name'),
             "experience": applicant.get('parsed_data', {}).get('experience', []),
-            "skills": applicant.get('parsed_data', {}).get('skills', [])
+            "skills": applicant.get('parsed_data', {}).get('skills', []),
         }
 
-        # LLM evaluation
         validation_result = validation_agent.run_validation(interview_data, candidate_profile)
         ai_eval = validation_result.get('ai_evaluation', {})
         interview_score = validation_result.get('final_score', 75)
 
-        # -------------------------------
-        # MCP ENRICHMENT (OLD MCP API)
-        # -------------------------------
         mcp_validation = None
         mcp_score = None
 
@@ -159,10 +140,7 @@ def validate_interview():
                             if "validate_interview" in tool_names:
                                 v_resp = await session.call_tool(
                                     "validate_interview",
-                                    {
-                                        "candidate_id": str(applicant_id),
-                                        "interview_data": interview_data
-                                    }
+                                    {"candidate_id": str(applicant_id), "interview_data": interview_data},
                                 )
                                 v = v_resp.output
 
@@ -174,8 +152,8 @@ def validate_interview():
                                         "interview_responses": [
                                             {"question": q, "response": r}
                                             for q, r in interview_data.get("responses", {}).items()
-                                        ]
-                                    }
+                                        ],
+                                    },
                                 )
                                 s = s_resp.output
 
@@ -184,15 +162,11 @@ def validate_interview():
                 mcp_validation, mcp_score = asyncio.run(call_mcp())
 
                 if mcp_score and "score" in mcp_score:
-                    interview_score = round(
-                        0.6 * interview_score + 0.4 * mcp_score["score"],
-                        2
-                    )
+                    interview_score = round(0.6 * interview_score + 0.4 * mcp_score["score"], 2)
 
             except Exception as e:
                 print("[MCP ERROR]", e)
 
-        # Save interview result
         interview_id = next_id
         next_id += 1
 
@@ -203,9 +177,9 @@ def validate_interview():
             "validation_results": {
                 "ai_evaluation": ai_eval,
                 "mcp_validation": mcp_validation,
-                "mcp_score": mcp_score
+                "mcp_score": mcp_score,
             },
-            "interview_score": interview_score
+            "interview_score": interview_score,
         }
 
         applicants_store[applicant_id]["status"] = "interviewed"
@@ -216,16 +190,13 @@ def validate_interview():
             "interview_score": interview_score,
             "ai_evaluation": ai_eval,
             "mcp_validation": mcp_validation,
-            "mcp_score": mcp_score
+            "mcp_score": mcp_score,
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# ------------------------------------------------------------
-# FINAL RECOMMENDATION
-# ------------------------------------------------------------
 @app.route('/recommend/<int:applicant_id>', methods=['POST'])
 def generate_recommendation(applicant_id):
     global next_id
@@ -235,8 +206,7 @@ def generate_recommendation(applicant_id):
             return jsonify({"error": "Applicant not found"}), 404
 
         applicant_interviews = [
-            interview for interview in interviews_store.values()
-            if interview["applicant_id"] == applicant_id
+            i for i in interviews_store.values() if i["applicant_id"] == applicant_id
         ]
 
         if not applicant_interviews:
@@ -247,7 +217,6 @@ def generate_recommendation(applicant_id):
         resume_evaluation = applicant.get("parsed_data", {}).get("ai_evaluation", {})
         interview_evaluation = latest_interview.get("validation_results", {}).get("ai_evaluation", {})
 
-        # Combine with LLM
         final_recommendation = asyncio.run(
             llm_client.generate_final_recommendation(
                 resume_evaluation,
@@ -256,8 +225,8 @@ def generate_recommendation(applicant_id):
                     "name": applicant.get("name"),
                     "email": applicant.get("email"),
                     "screening_score": applicant.get("screening_score"),
-                    "interview_score": latest_interview.get("interview_score")
-                }
+                    "interview_score": latest_interview.get("interview_score"),
+                },
             )
         )
 
@@ -273,49 +242,34 @@ def generate_recommendation(applicant_id):
             "interview_id": latest_interview["id"],
             "final_score": final_score,
             "recommendation": decision,
-            "reasoning": final_recommendation.get("detailed_reasoning", "")
+            "reasoning": final_recommendation.get("detailed_reasoning", ""),
         }
 
         return jsonify({
             "status": "success",
             "recommendation_id": rec_id,
             "final_recommendation": final_recommendation,
-            "model_used": "gpt-4o"
+            "provider": os.getenv("LLM_PROVIDER", "ollama"),
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# ------------------------------------------------------------
-# GET APPLICANTS
-# ------------------------------------------------------------
 @app.route('/applicants', methods=['GET'])
 def get_applicants():
     try:
         status = request.args.get("status")
-
-        if status:
-            filtered = [
-                a for a in applicants_store.values()
-                if a.get("status") == status
-            ]
-        else:
-            filtered = list(applicants_store.values())
-
-        return jsonify({
-            "status": "success",
-            "count": len(filtered),
-            "applicants": filtered
-        })
-
+        filtered = (
+            [a for a in applicants_store.values() if a.get("status") == status]
+            if status
+            else list(applicants_store.values())
+        )
+        return jsonify({"status": "success", "count": len(filtered), "applicants": filtered})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# ------------------------------------------------------------
-# GET SINGLE APPLICANT PROFILE
-# ------------------------------------------------------------
 @app.route('/applicant/<int:applicant_id>', methods=['GET'])
 def get_applicant_profile(applicant_id):
     try:
@@ -323,29 +277,17 @@ def get_applicant_profile(applicant_id):
         if not applicant:
             return jsonify({"error": "Applicant not found"}), 404
 
-        applicant_interviews = [
-            i for i in interviews_store.values()
-            if i["applicant_id"] == applicant_id
-        ]
-
-        applicant_recommendations = [
-            r for r in recommendations_store.values()
-            if r["applicant_id"] == applicant_id
-        ]
-
         return jsonify({
             "status": "success",
             "profile": {
                 "applicant": applicant,
-                "interviews": applicant_interviews,
-                "recommendations": applicant_recommendations
-            }
+                "interviews": [i for i in interviews_store.values() if i["applicant_id"] == applicant_id],
+                "recommendations": [r for r in recommendations_store.values() if r["applicant_id"] == applicant_id],
+            },
         })
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

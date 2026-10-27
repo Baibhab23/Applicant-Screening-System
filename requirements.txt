@@ -1,9 +1,10 @@
 flask
-generative-ai-hub-sdk==4.12.4
 pydantic==2.10.6
 langchain
-langchain-openai
 langchain-core
+langchain-openai
+langchain-ollama
+langchain-groq
 langgraph
 mcp==1.9.4
 fastmcp==2.9.2
@@ -14,3 +15,4 @@ requests
 httpx
 httpx-sse
 anyio
+python-dotenv

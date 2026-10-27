@@ -1,0 +1,22 @@
+{
+  "provider": "ollama",
+  "model": "llama3.1",
+  "base_url": "http://localhost:11434",
+  "temperature": 0.7,
+  "max_tokens": 4000,
+  "providers": {
+    "ollama": {
+      "description": "Free local inference. Install from https://ollama.com",
+      "default_model": "llama3.1",
+      "base_url": "http://localhost:11434"
+    },
+    "groq": {
+      "description": "Free cloud API with fast inference. Get key at https://console.groq.com",
+      "default_model": "llama-3.1-8b-instant"
+    },
+    "openai": {
+      "description": "OpenAI API. Get key at https://platform.openai.com",
+      "default_model": "gpt-4o-mini"
+    }
+  }
+}
