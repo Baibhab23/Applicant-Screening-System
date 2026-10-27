@@ -2,19 +2,68 @@
 
 An AI-powered applicant screening and interview validation system using open-source LLMs via Ollama, Groq, or OpenAI.
 
-## Project Structure
+## Architecture
 
-- **src/**: Main application code
-  - **app.py**: Flask API entry point
-  - **agents/**: Screening and validation agents
-  - **mcp_servers/**: MCP server tools (interview validation, scoring)
-  - **models/**: Data models for applicants and interviews
-  - **utils/**: LLM client and config utilities
-  - **tools/**: Resume parser and interview scorer
-- **config/**: Configuration files
-  - **llm_config.json**: LLM provider settings
-  - **mcp_servers.json**: MCP server endpoints
-- **tests/**: Unit tests
+```mermaid
+flowchart TD
+    Client(["Client (HTTP)"])
+
+    subgraph FlaskAPI["Flask API  —  src/app.py"]
+        S["/screen"]
+        V["/validate"]
+        R["/recommend"]
+    end
+
+    subgraph Agents["Agents"]
+        SA["ScreeningAgent"]
+        VA["ValidationAgent"]
+    end
+
+    subgraph LLMLayer["LLM Layer  —  src/utils/llm_client.py"]
+        LC["LLMClient"]
+        subgraph Providers["Provider (env: LLM_PROVIDER)"]
+            OL["Ollama\n(free / local)"]
+            GR["Groq\n(free cloud)"]
+            OA["OpenAI\n(optional)"]
+        end
+    end
+
+    subgraph MCPServer["MCP Server  —  src/mcp_servers/interview_validator.py"]
+        T1["validate_interview()"]
+        T2["score_interview()"]
+        T3["get_interview_questions()"]
+    end
+
+    subgraph Tools["Tools"]
+        RP["ResumeParser"]
+        IS["InterviewScorer"]
+    end
+
+    subgraph Models["Data Models"]
+        AM["Applicant"]
+        IM["Interview"]
+    end
+
+    Client -->|POST /screen| S
+    Client -->|POST /validate| V
+    Client -->|POST /recommend| R
+
+    S --> RP
+    S --> SA
+    V --> VA
+    V -->|SSE| MCPServer
+    R --> LC
+
+    SA --> LC
+    VA --> LC
+
+    LC --> OL
+    LC --> GR
+    LC --> OA
+
+    S -.->|stores| AM
+    V -.->|stores| IM
+```
 
 ## Setup
 
@@ -122,11 +171,3 @@ curl -X POST http://localhost:5000/validate \
   }'
 ```
 
-## Architecture
-
-The system is modular:
-- **LLM Client** (`src/utils/llm_client.py`): Abstracts Ollama/Groq/OpenAI behind a common interface
-- **Screening Agent**: Evaluates resumes using LLM
-- **Validation Agent**: Evaluates interview responses using LLM
-- **MCP Server** (`src/mcp_servers/interview_validator.py`): Provides rule-based interview scoring tools
-- **Flask API**: Ties everything together
