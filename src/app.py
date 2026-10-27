@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 import asyncio
+import json as _json
 import os
 import sys
 
@@ -142,7 +143,8 @@ def validate_interview():
                                     "validate_interview",
                                     {"candidate_id": str(applicant_id), "interview_data": interview_data},
                                 )
-                                v = v_resp.output
+                                if v_resp.content:
+                                    v = _json.loads(v_resp.content[0].text)
 
                             if "score_interview" in tool_names:
                                 s_resp = await session.call_tool(
@@ -155,7 +157,8 @@ def validate_interview():
                                         ],
                                     },
                                 )
-                                s = s_resp.output
+                                if s_resp.content:
+                                    s = _json.loads(s_resp.content[0].text)
 
                             return v, s
 
