@@ -65,6 +65,7 @@ def score_interview(candidate_id: str, interview_responses: list) -> dict:
 
     total_score = 0
     max_score = len(interview_responses) * 10
+    response_breakdowns = []
 
     for response in interview_responses:
         response_text = response.get("response", "")
@@ -95,6 +96,19 @@ def score_interview(candidate_id: str, interview_responses: list) -> dict:
         response_score = (length_score + depth_score + reasoning_score + coherence_score) * stuffing_penalty
         total_score += response_score
 
+        response_breakdowns.append({
+            "question": response.get("question", ""),
+            "scores": {
+                "length": round(length_score, 2),
+                "technical_depth": round(depth_score, 2),
+                "reasoning_structure": round(reasoning_score, 2),
+                "coherence": coherence_score,
+            },
+            "stuffing_penalty_applied": stuffing_penalty < 1.0,
+            "response_score": round(response_score, 2),
+            "response_score_max": 10,
+        })
+
     percentage = (total_score / max_score) * 100 if max_score > 0 else 0
 
     return {
@@ -104,6 +118,13 @@ def score_interview(candidate_id: str, interview_responses: list) -> dict:
         "total_points": round(total_score, 2),
         "max_points": max_score,
         "recommendation": "HIRE" if percentage >= 70 else "MAYBE" if percentage >= 50 else "REJECT",
+        "response_breakdowns": response_breakdowns,
+        "dimension_totals": {
+            "length": round(sum(r["scores"]["length"] for r in response_breakdowns), 2),
+            "technical_depth": round(sum(r["scores"]["technical_depth"] for r in response_breakdowns), 2),
+            "reasoning_structure": round(sum(r["scores"]["reasoning_structure"] for r in response_breakdowns), 2),
+            "coherence": round(sum(r["scores"]["coherence"] for r in response_breakdowns), 2),
+        },
     }
 
 

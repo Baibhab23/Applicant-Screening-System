@@ -219,6 +219,7 @@ def generate_recommendation(applicant_id):
 
         resume_evaluation = applicant.get("parsed_data", {}).get("ai_evaluation", {})
         interview_evaluation = latest_interview.get("validation_results", {}).get("ai_evaluation", {})
+        mcp_score_data = latest_interview.get("validation_results", {}).get("mcp_score")
 
         final_recommendation = asyncio.run(
             llm_client.generate_final_recommendation(
@@ -252,6 +253,7 @@ def generate_recommendation(applicant_id):
             "status": "success",
             "recommendation_id": rec_id,
             "final_recommendation": final_recommendation,
+            "mcp_score_breakdown": mcp_score_data,
             "provider": os.getenv("LLM_PROVIDER", "ollama"),
         })
 
