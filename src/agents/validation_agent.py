@@ -15,9 +15,17 @@ class ValidationAgent:
 
         evaluation = await self.llm_client.evaluate_interview(interview_data, candidate_profile)
 
+        if evaluation.get("evaluation_status") == "failed":
+            return {
+                "ai_evaluation": evaluation,
+                "final_score": None,
+                "evaluation_status": "failed",
+            }
+
         return {
             "ai_evaluation": evaluation,
-            "final_score": evaluation.get("overall_score", 75),
+            "final_score": evaluation.get("overall_score"),
+            "evaluation_status": "ok",
         }
 
     def run_validation(self, interview_data: dict, candidate_profile: dict = None):

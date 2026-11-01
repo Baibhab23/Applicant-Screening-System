@@ -32,7 +32,19 @@ def validate_interview(candidate_id: str, interview_data: dict) -> dict:
 
 @mcp.tool()
 def score_interview(candidate_id: str, interview_responses: list) -> dict:
-    """Score the interview based on candidate responses."""
+    """Score interview responses for structural integrity.
+
+    This scorer measures whether responses are substantive, causally structured,
+    and technically grounded — not whether the candidate is a good hire. It is a
+    pre-filter signal: a low score means the response is likely too thin to evaluate;
+    a high score means there is enough substance for a human or LLM reviewer to assess.
+    It cannot distinguish a genuinely expert answer from a keyword-aware non-answer,
+    and its thresholds have not been calibrated against hiring outcomes.
+
+    The returned `structural_signal` field (STRONG/ADEQUATE/WEAK) is intentionally
+    distinct from the HIRE/MAYBE/REJECT vocabulary to prevent it from being used
+    directly as a hiring decision.
+    """
 
     if not interview_responses:
         return {
@@ -111,13 +123,20 @@ def score_interview(candidate_id: str, interview_responses: list) -> dict:
 
     percentage = (total_score / max_score) * 100 if max_score > 0 else 0
 
+    if percentage >= 70:
+        structural_signal = "STRONG"
+    elif percentage >= 50:
+        structural_signal = "ADEQUATE"
+    else:
+        structural_signal = "WEAK"
+
     return {
         "candidate_id": candidate_id,
         "status": "scored",
         "score": round(percentage, 2),
         "total_points": round(total_score, 2),
         "max_points": max_score,
-        "recommendation": "HIRE" if percentage >= 70 else "MAYBE" if percentage >= 50 else "REJECT",
+        "structural_signal": structural_signal,
         "response_breakdowns": response_breakdowns,
         "dimension_totals": {
             "length": round(sum(r["scores"]["length"] for r in response_breakdowns), 2),

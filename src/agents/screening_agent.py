@@ -19,7 +19,15 @@ class ScreeningAgent:
 
         evaluation = await self.llm_client.evaluate_resume(resume_text, job_requirements)
 
+        if evaluation.get("evaluation_status") == "failed":
+            return {
+                "ai_evaluation": evaluation,
+                "final_score": None,
+                "evaluation_status": "failed",
+            }
+
         return {
             "ai_evaluation": evaluation,
-            "final_score": evaluation.get("match_score", 70),
+            "final_score": evaluation.get("match_score"),
+            "evaluation_status": "ok",
         }

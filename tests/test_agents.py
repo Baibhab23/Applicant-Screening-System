@@ -30,7 +30,8 @@ def test_screening_agent_process_resume_structure():
     if error is None and result is not None:
         assert "ai_evaluation" in result
         assert "final_score" in result
-        assert isinstance(result["final_score"], (int, float))
+        assert result["final_score"] is None or isinstance(result["final_score"], (int, float))
+        assert result["final_score"] is None or isinstance(result["final_score"], (int, float))
 
 
 def test_validation_agent_run_validation_structure():
@@ -52,3 +53,4 @@ def test_validation_agent_run_validation_structure():
     if error is None and result is not None:
         assert "ai_evaluation" in result
         assert "final_score" in result
+        assert result["final_score"] is None or isinstance(result["final_score"], (int, float))

@@ -69,7 +69,13 @@ def screen_applicant():
             screening_agent.process_resume(resume_text, job_requirements)
         )
 
-        screening_score = screening_result.get('final_score', 70)
+        if screening_result.get("evaluation_status") == "failed":
+            return jsonify({
+                "error": "LLM evaluation failed — the model did not return a parseable response",
+                "evaluation_error": screening_result.get("ai_evaluation", {}).get("evaluation_error"),
+            }), 422
+
+        screening_score = screening_result.get('final_score')
         ai_eval = screening_result.get('ai_evaluation', {})
 
         applicant_id = next_id
@@ -121,11 +127,19 @@ def validate_interview():
         }
 
         validation_result = validation_agent.run_validation(interview_data, candidate_profile)
+
+        if validation_result.get("evaluation_status") == "failed":
+            return jsonify({
+                "error": "LLM evaluation failed — the model did not return a parseable response",
+                "evaluation_error": validation_result.get("ai_evaluation", {}).get("evaluation_error"),
+            }), 422
+
         ai_eval = validation_result.get('ai_evaluation', {})
-        interview_score = validation_result.get('final_score', 75)
+        interview_score = validation_result.get('final_score')
 
         mcp_validation = None
         mcp_score = None
+        score_blending_note = None
 
         if USE_MCP:
             try:
@@ -164,8 +178,20 @@ def validate_interview():
 
                 mcp_validation, mcp_score = asyncio.run(call_mcp())
 
-                if mcp_score and "score" in mcp_score:
-                    interview_score = round(0.6 * interview_score + 0.4 * mcp_score["score"], 2)
+                if mcp_score and "score" in mcp_score and interview_score is not None:
+                    # The 60/40 split combines two scores that are not on the same
+                    # distribution: the LLM score is a holistic semantic judgment while
+                    # the MCP score counts structural signals. The weights have not been
+                    # validated against hiring outcomes. Treat the blended score as a
+                    # rough composite until calibrated against labelled data.
+                    LLM_WEIGHT = 0.6
+                    MCP_WEIGHT = 0.4
+                    interview_score = round(LLM_WEIGHT * interview_score + MCP_WEIGHT * mcp_score["score"], 2)
+                    score_blending_note = (
+                        f"Blended score: {LLM_WEIGHT:.0%} LLM (semantic) + "
+                        f"{MCP_WEIGHT:.0%} MCP (structural). "
+                        "Weights are unvalidated — do not use this number as the sole basis for a decision."
+                    )
 
             except Exception as e:
                 print("[MCP ERROR]", e)
@@ -194,6 +220,7 @@ def validate_interview():
             "ai_evaluation": ai_eval,
             "mcp_validation": mcp_validation,
             "mcp_score": mcp_score,
+            "score_blending_note": score_blending_note,
         })
 
     except Exception as e:
