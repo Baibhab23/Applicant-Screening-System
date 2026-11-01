@@ -33,46 +33,77 @@ def validate_interview(candidate_id: str, interview_data: dict) -> dict:
 @mcp.tool()
 def score_interview(candidate_id: str, interview_responses: list) -> dict:
     """Score the interview based on candidate responses."""
-    
+
     if not interview_responses:
         return {
             "candidate_id": candidate_id,
             "status": "error",
             "message": "No interview responses provided",
-            "score": 0
+            "score": 0,
         }
-    
-    # Calculate score based on response quality
+
+    # Domain-specific terms that signal technical depth — generic action verbs
+    # (implemented, developed, managed) removed because they appear in nearly
+    # every answer and reward verbosity over substance.
+    HIGH_VALUE_TERMS = [
+        "root cause", "trade-off", "tradeoff", "bottleneck", "profiler",
+        "complexity", "architecture", "refactor", "latency", "edge case",
+        "regression", "concurren", "algorithm", "benchmark", "constraint",
+        "failure mode", "hypothesis", "measured", "scalab", "optimis", "optimiz",
+    ]
+
+    # Connectives that reward structured reasoning ("because X, therefore Y")
+    # rather than keyword listing.
+    REASONING_TERMS = [
+        "because", "therefore", "however", "which caused", "resulted in",
+        "identified", "discovered", "reduced", "improved", "analysed",
+        "analyzed", "designed", "iterated", "led to", "in order to",
+    ]
+
+    # Keyword density above this threshold flags likely stuffing.
+    STUFFING_DENSITY_THRESHOLD = 0.10
+
     total_score = 0
     max_score = len(interview_responses) * 10
-    
+
     for response in interview_responses:
         response_text = response.get("response", "")
-        
-        # Score factors
-        length_score = min(len(response_text) / 100, 1) * 3  # Max 3 points for length
-        keyword_score = 0
-        
-        # Check for quality keywords
-        quality_keywords = ["experience", "project", "team", "implemented", "developed", "managed"]
-        keyword_matches = sum(1 for kw in quality_keywords if kw.lower() in response_text.lower())
-        keyword_score = min(keyword_matches, 4)  # Max 4 points for keywords
-        
-        # Completeness score
-        completeness_score = 3 if len(response_text) > 200 else 1
-        
-        response_score = length_score + keyword_score + completeness_score
+        text_lower = response_text.lower()
+        word_count = max(len(response_text.split()), 1)
+
+        # 1. Length (max 2 pts) — rewards substance, not padding
+        length_score = min(len(response_text) / 150, 1) * 2
+
+        # 2. Technical depth (max 4 pts) — one point per unique high-value term
+        depth_hits = sum(1 for kw in HIGH_VALUE_TERMS if kw in text_lower)
+        depth_score = min(depth_hits, 4)
+
+        # 3. Reasoning structure (max 3 pts) — rewards causal explanation
+        reasoning_hits = sum(1 for kw in REASONING_TERMS if kw in text_lower)
+        reasoning_score = min(reasoning_hits, 3)
+
+        # 4. Coherence (max 1 pt) — penalises single-sentence non-answers
+        sentence_count = text_lower.count(".") + text_lower.count("?") + text_lower.count("!")
+        coherence_score = 1 if sentence_count >= 2 else 0
+
+        # Stuffing penalty: if keyword hits are dense relative to total words,
+        # the answer is likely padded rather than substantive — halve the score.
+        total_hits = depth_hits + reasoning_hits
+        density = total_hits / word_count
+        stuffing_penalty = 0.5 if (density > STUFFING_DENSITY_THRESHOLD and total_hits > 3) else 1.0
+
+        response_score = (length_score + depth_score + reasoning_score + coherence_score) * stuffing_penalty
         total_score += response_score
-    
+
     percentage = (total_score / max_score) * 100 if max_score > 0 else 0
-    
+
     return {
         "candidate_id": candidate_id,
         "status": "scored",
         "score": round(percentage, 2),
         "total_points": round(total_score, 2),
         "max_points": max_score,
-        "recommendation": "HIRE" if percentage >= 70 else "MAYBE" if percentage >= 50 else "REJECT"
+        "recommendation": "HIRE" if percentage >= 70 else "MAYBE" if percentage >= 50 else "REJECT",
     }
 
 
