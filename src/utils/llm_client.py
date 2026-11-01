@@ -1,6 +1,12 @@
+from __future__ import annotations
+
+import asyncio
 import os
 import json
 from langchain_core.messages import HumanMessage, SystemMessage
+
+from utils.schemas import ResumeEvaluation, InterviewEvaluation, FinalRecommendation
+from utils.pii_redactor import redact_pii
 
 
 class LLMClient:
@@ -8,6 +14,9 @@ class LLMClient:
     LLM client supporting Ollama (free/local), Groq (free cloud), and OpenAI.
     Set LLM_PROVIDER env var to "ollama" (default), "groq", or "openai".
     """
+
+    # Cloud providers send data to external services — redact PII before prompting.
+    _CLOUD_PROVIDERS = {"groq", "openai"}
 
     def __init__(self, model_name: str = None):
         self.provider = os.getenv("LLM_PROVIDER", "ollama").lower()
@@ -17,7 +26,8 @@ class LLMClient:
 
         self.model_name = model_name
         self.llm = self._init_llm()
-        print(f"LLM initialized: provider={self.provider}, model={self.model_name}")
+        self.timeout = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+        print(f"LLM initialized: provider={self.provider}, model={self.model_name}, timeout={self.timeout}s")
 
     def _default_model(self) -> str:
         defaults = {
@@ -77,7 +87,16 @@ class LLMClient:
         if system_message:
             messages.append(SystemMessage(content=system_message))
         messages.append(HumanMessage(content=user_message))
-        response = await self.llm.ainvoke(messages)
+        try:
+            response = await asyncio.wait_for(
+                self.llm.ainvoke(messages),
+                timeout=self.timeout,
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"LLM request timed out after {self.timeout}s. "
+                "Increase LLM_TIMEOUT_SECONDS or check provider availability."
+            )
         return response.content
 
     def _parse_json_response(self, content: str) -> dict:
@@ -93,6 +112,30 @@ class LLMClient:
         except Exception as e:
             print(f"[LLM] JSON parse failed: {e}")
             return {"evaluation_status": "failed", "evaluation_error": str(e)}
+
+    def _validate(self, raw: dict, schema_cls):
+        """
+        Validate raw LLM output against a Pydantic schema.
+        Returns a clean dict on success, or a failure dict if validation fails.
+        Catches out-of-range scores, missing required fields, and invalid enums
+        before they reach the recruiter as a plausible-looking evaluation.
+        """
+        if raw.get("evaluation_status") == "failed":
+            return raw
+        try:
+            validated = schema_cls(**raw)
+            result = validated.model_dump()
+            result["evaluation_status"] = "ok"
+            return result
+        except Exception as e:
+            print(f"[LLM] Schema validation failed: {e}")
+            return {"evaluation_status": "failed", "evaluation_error": f"Schema validation failed: {e}"}
+
+    def _maybe_redact(self, text: str) -> str:
+        """Redact PII from text before sending to cloud providers."""
+        if self.provider in self._CLOUD_PROVIDERS:
+            return redact_pii(text)
+        return text
 
     async def evaluate_resume(self, resume_text: str, job_requirements: dict) -> dict:
         system_prompt = (
@@ -110,6 +153,8 @@ class LLMClient:
         )
 
         # Explicit delimiters prevent resume text from being treated as instructions.
+        # PII is redacted when using cloud providers so identifiers don't leave the environment.
+        safe_resume = self._maybe_redact(resume_text)
         user_prompt = (
             "Job Requirements:\n"
             "<user_content>\n"
@@ -117,16 +162,14 @@ class LLMClient:
             "</user_content>\n\n"
             "Resume:\n"
             "<user_content>\n"
-            f"{resume_text}\n"
+            f"{safe_resume}\n"
             "</user_content>\n\n"
             "Provide detailed evaluation in JSON format."
         )
 
         response = await self.send_request(user_prompt, system_prompt)
-        result = self._parse_json_response(response)
-        if "evaluation_status" not in result:
-            result["evaluation_status"] = "ok"
-        return result
+        raw = self._parse_json_response(response)
+        return self._validate(raw, ResumeEvaluation)
 
     async def evaluate_interview(self, interview_data: dict, candidate_profile: dict) -> dict:
         system_prompt = (
@@ -168,10 +211,8 @@ class LLMClient:
         )
 
         response = await self.send_request(user_prompt, system_prompt)
-        result = self._parse_json_response(response)
-        if "evaluation_status" not in result:
-            result["evaluation_status"] = "ok"
-        return result
+        raw = self._parse_json_response(response)
+        return self._validate(raw, InterviewEvaluation)
 
     async def generate_final_recommendation(
         self,
@@ -209,10 +250,8 @@ class LLMClient:
         )
 
         response = await self.send_request(user_prompt, system_prompt)
-        result = self._parse_json_response(response)
-        if "evaluation_status" not in result:
-            result["evaluation_status"] = "ok"
-        return result
+        raw = self._parse_json_response(response)
+        return self._validate(raw, FinalRecommendation)
 
     def get_llm(self):
         return self.llm

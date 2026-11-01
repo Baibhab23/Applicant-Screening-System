@@ -16,3 +16,5 @@ httpx
 httpx-sse
 anyio
 python-dotenv
+PyJWT
+flask-limiter
