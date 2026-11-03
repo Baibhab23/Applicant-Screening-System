@@ -141,9 +141,6 @@ def insert_interview(
     interview_data: dict,
     validation_results: dict,
     interview_score,
-    evaluation_partial: bool,
-    evaluation_components: dict,
-    mcp_error: str | None,
 ) -> int:
     with get_conn() as conn:
         cur = conn.execute(
@@ -156,9 +153,9 @@ def insert_interview(
                 json.dumps(interview_data),
                 json.dumps(validation_results),
                 interview_score,
-                int(evaluation_partial),
-                json.dumps(evaluation_components),
-                mcp_error,
+                0,
+                json.dumps({}),
+                None,
                 _now(),
             ),
         )

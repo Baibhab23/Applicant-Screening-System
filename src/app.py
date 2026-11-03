@@ -12,9 +12,6 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.exceptions import HTTPException
 
-from mcp import ClientSession
-from mcp.client.sse import sse_client
-
 from agents.screening_agent import ScreeningAgent
 from agents.validation_agent import ValidationAgent
 from models.db import (
@@ -32,14 +29,9 @@ from models.db import (
 )
 from tools.resume_parser import ResumeParser
 from utils.auth import issue_token, require_auth
-from utils.config_loader import load_mcp_config
 from utils.llm_client import LLMClient
 
 # ── configuration ─────────────────────────────────────────────────────────────
-
-mcp_cfg = load_mcp_config()
-MCP_URL = mcp_cfg["mcpServers"]["interview_validator"]["url"]
-USE_MCP = True
 
 # Maximum resume / interview payload in bytes (1 MB).
 # Large payloads burn tokens and can slow the LLM; this is the system boundary.
@@ -212,97 +204,11 @@ def validate_interview():
         ai_eval = validation_result.get("ai_evaluation", {})
         interview_score = validation_result.get("final_score")
 
-        # Track which scoring components actually ran. If MCP is unavailable,
-        # mark the evaluation PARTIAL so the recruiter knows the combined score
-        # was not produced as expected — not silently substitute LLM-only scoring.
-        evaluation_components = {
-            "llm_interview_eval": True,
-            "mcp_structural_validation": False,
-            "mcp_structural_scoring": False,
-        }
-        mcp_validation = None
-        mcp_score = None
-        mcp_error = None
-        score_blending_note = None
-
-        if USE_MCP:
-            try:
-                async def call_mcp():
-                    async with sse_client(MCP_URL) as (read, write):
-                        async with ClientSession(read, write) as session:
-                            await session.initialize()
-                            tools = await session.list_tools()
-                            tool_names = {t.name for t in tools.tools}
-
-                            v = s = None
-
-                            if "validate_interview" in tool_names:
-                                v_resp = await session.call_tool(
-                                    "validate_interview",
-                                    {"candidate_id": str(applicant_id), "interview_data": interview_data},
-                                )
-                                if v_resp.content:
-                                    v = _json.loads(v_resp.content[0].text)
-
-                            if "score_interview" in tool_names:
-                                s_resp = await session.call_tool(
-                                    "score_interview",
-                                    {
-                                        "candidate_id": str(applicant_id),
-                                        "interview_responses": [
-                                            {"question": q, "response": r}
-                                            for q, r in interview_data.get("responses", {}).items()
-                                        ],
-                                    },
-                                )
-                                if s_resp.content:
-                                    s = _json.loads(s_resp.content[0].text)
-
-                            return v, s
-
-                mcp_validation, mcp_score = asyncio.run(call_mcp())
-
-                if mcp_validation:
-                    evaluation_components["mcp_structural_validation"] = True
-                if mcp_score and "score" in mcp_score:
-                    evaluation_components["mcp_structural_scoring"] = True
-
-                if mcp_score and "score" in mcp_score and interview_score is not None:
-                    # The 60/40 split combines two scores that are not on the same
-                    # distribution: the LLM score is a holistic semantic judgment while
-                    # the MCP score counts structural signals. The weights have not been
-                    # validated against hiring outcomes. Treat the blended score as a
-                    # rough composite until calibrated against labelled data.
-                    LLM_WEIGHT = 0.6
-                    MCP_WEIGHT = 0.4
-                    interview_score = round(
-                        LLM_WEIGHT * interview_score + MCP_WEIGHT * mcp_score["score"], 2
-                    )
-                    score_blending_note = (
-                        f"Blended score: {LLM_WEIGHT:.0%} LLM (semantic) + "
-                        f"{MCP_WEIGHT:.0%} MCP (structural). "
-                        "Weights are unvalidated — do not use this number as the sole basis for a decision."
-                    )
-
-            except Exception as e:
-                mcp_error = str(e)
-                print("[MCP ERROR]", e)
-
-        # If MCP was expected but did not fully run, mark the evaluation PARTIAL.
-        evaluation_partial = USE_MCP and not all(evaluation_components.values())
-
         interview_id = insert_interview(
             applicant_id=applicant_id,
             interview_data=interview_data,
-            validation_results={
-                "ai_evaluation": ai_eval,
-                "mcp_validation": mcp_validation,
-                "mcp_score": mcp_score,
-            },
+            validation_results={"ai_evaluation": ai_eval},
             interview_score=interview_score,
-            evaluation_partial=evaluation_partial,
-            evaluation_components=evaluation_components,
-            mcp_error=mcp_error,
         )
 
         update_applicant_status(applicant_id, "interviewed")
@@ -311,8 +217,6 @@ def validate_interview():
             "applicant_id": applicant_id,
             "interview_id": interview_id,
             "interview_score": interview_score,
-            "evaluation_partial": evaluation_partial,
-            "evaluation_components": evaluation_components,
         })
 
         return jsonify({
@@ -320,12 +224,6 @@ def validate_interview():
             "interview_id": interview_id,
             "interview_score": interview_score,
             "ai_evaluation": ai_eval,
-            "mcp_validation": mcp_validation,
-            "mcp_score": mcp_score,
-            "evaluation_partial": evaluation_partial,
-            "evaluation_components": evaluation_components,
-            "mcp_error": mcp_error,
-            "score_blending_note": score_blending_note,
         })
 
     except HTTPException:
@@ -353,7 +251,6 @@ def generate_recommendation(applicant_id):
 
         resume_evaluation = applicant.get("parsed_data", {}).get("ai_evaluation", {})
         interview_evaluation = latest_interview.get("validation_results", {}).get("ai_evaluation", {})
-        mcp_score_data = latest_interview.get("validation_results", {}).get("mcp_score")
 
         final_recommendation = asyncio.run(
             llm_client.generate_final_recommendation(
@@ -400,7 +297,6 @@ def generate_recommendation(applicant_id):
             "status": "success",
             "recommendation_id": rec_id,
             "final_recommendation": final_recommendation,
-            "mcp_score_breakdown": mcp_score_data,
             "provider": os.getenv("LLM_PROVIDER", "ollama"),
         })
 

@@ -4,13 +4,13 @@ An AI-powered applicant screening and interview validation system using open-sou
 
 ## Architecture
 
-The system is a three-stage hiring pipeline exposed as a Flask REST API. A resume submitted to `/screen` is parsed for contact details and skills, then handed to a `ScreeningAgent` that asks an LLM to score and evaluate it against job requirements. The result is stored in memory and an applicant ID is returned.
+The system is a three-stage hiring pipeline exposed as a Flask REST API. A resume submitted to `/screen` is parsed for contact details and skills, then handed to a `ScreeningAgent`. Before calling the LLM, the agent fetches job requirements from the MCP server (`get_job_requirements`) so the requirements live in one place rather than being hardcoded. The LLM then evaluates the resume against those requirements and returns a structured score.
 
-When interview responses arrive at `/validate`, two things run: a `ValidationAgent` calls the LLM for a semantic evaluation across technical ability, communication, and problem-solving, while a separate `MCP Server` process (running over SSE on `:8000`) applies rule-based checks — minimum question count, response length, and keyword scoring. The final interview score blends both: 60% LLM, 40% MCP rules.
+When interview responses arrive at `/validate`, the `ValidationAgent` opens a connection to the MCP server and loads its tools via `langchain_mcp_adapters`. The LLM itself decides to call `get_scoring_rubric` to understand what a good answer looks like for the role, and `get_interview_questions` to see standard questions. Only after gathering that context does it evaluate the candidate's responses — the LLM is the caller of the MCP tools, not Flask. This is the correct use of MCP: tools are there for the model to reason with, not for the application layer to call deterministically.
 
-Calling `/recommend/<id>` pulls both evaluations and sends them together to the LLM in a single prompt, which returns a `STRONG_HIRE / HIRE / MAYBE / REJECT` decision with a confidence score and reasoning.
+Calling `/recommend/<id>` pulls both the resume and interview evaluations and sends them together to the LLM in a single prompt, which returns a `STRONG_HIRE / HIRE / MAYBE / REJECT` decision with a confidence score and reasoning.
 
-The LLM layer is provider-agnostic — a single `LLM_PROVIDER` environment variable switches between **Ollama** (local, free), **Groq** (cloud, free), and **OpenAI** without changing any application code. All state lives in plain Python dicts in memory; there is no database.
+The LLM layer is provider-agnostic — a single `LLM_PROVIDER` environment variable switches between **Ollama** (local, free), **Groq** (cloud, free), and **OpenAI** without changing any application code. All state is persisted in a SQLite database.
 
 ## Setup
 
